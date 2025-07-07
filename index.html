@@ -391,6 +391,7 @@
             player.x = canvas.width / 2 - 30;
             player.trail = [];
             gameOverScreen.style.display = 'none';
+            startBtn.style.display = 'none'; // スタートボタンを非表示
             frameCount = 0;
             
             destroySound.playbackRate = 1.0;
@@ -415,6 +416,9 @@
         function endGame() {
             gameState = 'gameOver';
             gameOverScreen.style.display = 'block';
+            if (isMobile) {
+                startBtn.style.display = 'block'; // ゲームオーバー時にスタートボタンを再表示
+            }
             try {
                 gameBGM.pause();
                 menuBGM.play().catch(e => console.log('Audio play failed'));
