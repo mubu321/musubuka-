@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
     <title>むすぶカー - 高速破壊</title>
     <style>
         body {
@@ -24,6 +24,9 @@
             padding: 20px;
             box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
             border: 2px solid #7f8c8d;
+            width: 95vw;
+            max-width: 420px;
+            box-sizing: border-box;
         }
 
         h1 {
@@ -38,6 +41,11 @@
             border-radius: 15px;
             background: #2c3e50;
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+            width: 100%;
+            height: auto;
+            max-width: 400px;
+            max-height: 600px;
+            touch-action: none;
         }
 
         .controls {
@@ -86,7 +94,41 @@
             background: linear-gradient(45deg, #95a5a6, #bdc3c7);
         }
 
-
+        /* スマホ用の仮想ボタン */
+        .touch-controls {
+            display: none;
+            margin-top: 10px;
+            justify-content: center;
+            gap: 30px;
+        }
+        .touch-btn {
+            background: linear-gradient(45deg, #95a5a6, #7f8c8d);
+            color: #fff;
+            border: none;
+            border-radius: 50%;
+            width: 64px;
+            height: 64px;
+            font-size: 2em;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+            cursor: pointer;
+            touch-action: manipulation;
+        }
+        @media (max-width: 600px) {
+            .game-container {
+                padding: 8px;
+                max-width: 100vw;
+            }
+            .controls {
+                font-size: 1em;
+            }
+            .touch-controls {
+                display: flex;
+            }
+        }
     </style>
 </head>
 <body>
@@ -97,20 +139,48 @@
         <canvas id="gameCanvas" width="400" height="600"></canvas>
         <div class="controls">
             <p>左右キー: 車を操作 | スペースキー: ゲーム開始/再開</p>
+            <p style="font-size:0.9em;">スマホ: 下のボタンまたはスワイプで操作</p>
+        </div>
+        <div class="touch-controls" id="touchControls">
+            <button class="touch-btn" id="leftBtn">&#8592;</button>
+            <button class="touch-btn" id="rightBtn">&#8594;</button>
+            <button class="touch-btn" id="startBtn">&#9654;</button>
         </div>
         <div id="gameOverScreen" style="display: none;">
             <div class="game-over">タイムアップ！</div>
             <button class="restart-btn" onclick="restartGame()">もう一度プレイ</button>
         </div>
     </div>
-
     <script>
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         const scoreElement = document.getElementById('score');
         const timerElement = document.getElementById('timer');
         const gameOverScreen = document.getElementById('gameOverScreen');
+        const touchControls = document.getElementById('touchControls');
+        const leftBtn = document.getElementById('leftBtn');
+        const rightBtn = document.getElementById('rightBtn');
+        const startBtn = document.getElementById('startBtn');
 
+        // デバイス判定
+        function isMobile() {
+            return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        }
+        if(isMobile()){
+            touchControls.style.display = "flex";
+        }
+
+        // Canvasリサイズ対応
+        function resizeCanvas() {
+            let w = Math.min(window.innerWidth * 0.97, 400);
+            let h = w * 1.5;
+            canvas.width = w;
+            canvas.height = h;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        // 変数（元のまま）
         let gameState = 'waiting';
         let score = 0;
         let gameSpeed = 12; // 初期スピード大幅アップ
@@ -135,12 +205,12 @@
             y: canvas.height - 120,
             width: 60,
             height: 90,
-            speed: 12, // プレイヤーもハイスピード
+            speed: 12,
             color: '#7f8c8d',
             trail: []
         };
 
-        // 障害物（より多様で高密度）+ 敵車
+        // 障害物と敵車
         const obstacles = [];
         const enemyCars = [];
 
@@ -151,18 +221,15 @@
             { color: '#3498db', size: 40, points: 30, type: 'boulder' },
             { color: '#9b59b6', size: 28, points: 18, type: 'crate' }
         ];
-
         const enemyCarTypes = [
             { color: '#e74c3c', points: 25, type: 'enemyCar' },
             { color: '#f39c12', points: 35, type: 'enemyTruck' },
             { color: '#c0392b', points: 30, type: 'enemySports' }
         ];
 
-        // 破壊エフェクト
         const explosions = [];
         const screenShake = { x: 0, y: 0, intensity: 0 };
 
-        // 道路のライン（高速移動）
         const roadLines = [];
         for (let i = 0; i < 12; i++) {
             roadLines.push({
@@ -173,10 +240,10 @@
             });
         }
 
-        // 開始時にメニューBGMを再生
-        menuBGM.play().catch(e => console.log('Audio autoplay blocked'));
+        // BGM
+        menuBGM.play().catch(e => {});
 
-        // キー入力
+        // 入力
         const keys = {};
         document.addEventListener('keydown', (e) => {
             keys[e.key] = true;
@@ -187,46 +254,70 @@
                 }
             }
         });
-
         document.addEventListener('keyup', (e) => {
             keys[e.key] = false;
         });
 
-        // ピッチアップ機能
+        // タッチ・仮想ボタン
+        leftBtn.addEventListener('touchstart', e => { e.preventDefault(); keys['ArrowLeft'] = true; });
+        leftBtn.addEventListener('touchend', e => { e.preventDefault(); keys['ArrowLeft'] = false; });
+        rightBtn.addEventListener('touchstart', e => { e.preventDefault(); keys['ArrowRight'] = true; });
+        rightBtn.addEventListener('touchend', e => { e.preventDefault(); keys['ArrowRight'] = false; });
+        startBtn.addEventListener('touchstart', e => { e.preventDefault(); if(gameState==='waiting'||gameState==='gameOver'){ startGame(); } });
+
+        leftBtn.addEventListener('mousedown', e => { keys['ArrowLeft'] = true; });
+        leftBtn.addEventListener('mouseup', e => { keys['ArrowLeft'] = false; });
+        rightBtn.addEventListener('mousedown', e => { keys['ArrowRight'] = true; });
+        rightBtn.addEventListener('mouseup', e => { keys['ArrowRight'] = false; });
+        startBtn.addEventListener('click', e => { if(gameState==='waiting'||gameState==='gameOver'){ startGame(); } });
+
+        // スワイプ操作
+        let touchStartX = null;
+        canvas.addEventListener('touchstart', e => {
+            if (e.touches.length === 1) {
+                touchStartX = e.touches[0].clientX;
+            }
+        });
+        canvas.addEventListener('touchend', e => {
+            if (touchStartX !== null) {
+                const dx = e.changedTouches[0].clientX - touchStartX;
+                if (Math.abs(dx) > 30) {
+                    if (dx < 0) { keys['ArrowLeft'] = true; setTimeout(()=>{ keys['ArrowLeft'] = false; }, 120);}
+                    else { keys['ArrowRight'] = true; setTimeout(()=>{ keys['ArrowRight'] = false; }, 120);}
+                }
+                touchStartX = null;
+            }
+        });
+
+        // ピッチアップ音
         function playDestroySoundWithPitch() {
-            // ゲームスピードに応じてピッチを計算 (12が初期スピード)
             const basePitch = 1.0;
-            const pitchMultiplier = gameSpeed / 12; // 1.0から開始して徐々に上昇
-            const maxPitch = 2.5; // 最大ピッチを制限
-
-            // ピッチを1.0から2.5の間で制限
+            const pitchMultiplier = gameSpeed / 12;
+            const maxPitch = 2.5;
             const pitch = Math.min(basePitch * pitchMultiplier, maxPitch);
-
-            // Web Audio APIを使用してピッチを変更
-            if (destroySound.readyState >= 2) { // 音声が読み込み済みの場合
+            if (destroySound.readyState >= 2) {
                 destroySound.currentTime = 0;
                 destroySound.playbackRate = pitch;
-                destroySound.play().catch(e => console.log('Sound play failed'));
+                destroySound.play().catch(e => {});
             }
         }
 
         function startGame() {
             gameState = 'playing';
             score = 0;
-            gameSpeed = 12; // ハイスピード開始
+            gameSpeed = 12;
             gameTime = 60;
             obstacles.length = 0;
             enemyCars.length = 0;
             explosions.length = 0;
-            player.x = canvas.width / 2 - 30;
+            player.x = canvas.width / 2 - player.width/2;
+            player.y = canvas.height - player.height - 30;
             player.trail = [];
             gameOverScreen.style.display = 'none';
             frameCount = 0;
-
-            // 破壊音のピッチをリセット
             destroySound.playbackRate = 1.0;
-
-            // タイマー開始
+            timerElement.textContent = gameTime;
+            scoreElement.textContent = score;
             gameTimer = setInterval(() => {
                 gameTime--;
                 timerElement.textContent = gameTime;
@@ -235,20 +326,17 @@
                 }
             }, 1000);
 
-            // BGM切り替え
             menuBGM.pause();
             menuBGM.currentTime = 0;
-            gameBGM.play().catch(e => console.log('Audio play failed'));
+            gameBGM.play().catch(e => {});
         }
 
         function endGame() {
             gameState = 'gameOver';
             gameOverScreen.style.display = 'block';
             gameBGM.pause();
-            menuBGM.play().catch(e => console.log('Audio play failed'));
+            menuBGM.play().catch(e => {});
             clearInterval(gameTimer);
-
-            // 破壊音のピッチをリセット
             destroySound.playbackRate = 1.0;
         }
 
@@ -257,7 +345,13 @@
         }
 
         function spawnObstacle() {
-            const lanes = [60, 120, 180, 240, 300];
+            const lanes = [
+                canvas.width * 0.15,
+                canvas.width * 0.30,
+                canvas.width * 0.45,
+                canvas.width * 0.60,
+                canvas.width * 0.75
+            ];
             const lane = lanes[Math.floor(Math.random() * lanes.length)];
             const obstacleType = obstacleTypes[Math.floor(Math.random() * obstacleTypes.length)];
 
@@ -274,17 +368,22 @@
         }
 
         function spawnEnemyCar() {
-            const lanes = [75, 150, 225, 300];
+            const lanes = [
+                canvas.width * 0.1875,
+                canvas.width * 0.375,
+                canvas.width * 0.5625,
+                canvas.width * 0.75
+            ];
             const lane = lanes[Math.floor(Math.random() * lanes.length)];
             const enemyType = enemyCarTypes[Math.floor(Math.random() * enemyCarTypes.length)];
 
-            let width = 50, height = 80;
+            let width = 0.13 * canvas.width, height = 0.2 * canvas.height;
             if (enemyType.type === 'enemyTruck') {
-                width = 60;
-                height = 100;
+                width = 0.15 * canvas.width;
+                height = 0.23 * canvas.height;
             } else if (enemyType.type === 'enemySports') {
-                width = 45;
-                height = 75;
+                width = 0.1125 * canvas.width;
+                height = 0.1875 * canvas.height;
             }
 
             enemyCars.push({
@@ -305,14 +404,8 @@
                 y: player.y,
                 alpha: 1
             });
-
-            if (player.trail.length > 5) {
-                player.trail.shift();
-            }
-
-            player.trail.forEach(trail => {
-                trail.alpha -= 0.2;
-            });
+            if (player.trail.length > 5) player.trail.shift();
+            player.trail.forEach(trail => { trail.alpha -= 0.2; });
         }
 
         function drawPlayerTrail() {
@@ -331,25 +424,24 @@
             ctx.fillRect(car.x, car.y, car.width, car.height);
 
             ctx.fillStyle = '#34495e';
-            ctx.fillRect(car.x + 8, car.y + 15, car.width - 16, 20);
-            ctx.fillRect(car.x + 8, car.y + 55, car.width - 16, 20);
+            ctx.fillRect(car.x + car.width*0.13, car.y + car.height*0.16, car.width - car.width*0.26, car.height*0.22);
+            ctx.fillRect(car.x + car.width*0.13, car.y + car.height*0.61, car.width - car.width*0.26, car.height*0.22);
 
             ctx.fillStyle = '#2c3e50';
-            ctx.fillRect(car.x + 5, car.y + 5, car.width - 10, 8);
+            ctx.fillRect(car.x + car.width*0.08, car.y + car.height*0.05, car.width - car.width*0.16, car.height*0.13);
 
             ctx.fillStyle = '#2c3e50';
-            ctx.fillRect(car.x - 6, car.y + 8, 15, 25);
-            ctx.fillRect(car.x + car.width - 9, car.y + 8, 15, 25);
-            ctx.fillRect(car.x - 6, car.y + 57, 15, 25);
-            ctx.fillRect(car.x + car.width - 9, car.y + 57, 15, 25);
+            ctx.fillRect(car.x - car.width*0.1, car.y + car.height*0.09, car.width*0.375, car.height*0.28);
+            ctx.fillRect(car.x + car.width - car.width*0.225, car.y + car.height*0.09, car.width*0.375, car.height*0.28);
+            ctx.fillRect(car.x - car.width*0.1, car.y + car.height*0.63, car.width*0.375, car.height*0.28);
+            ctx.fillRect(car.x + car.width - car.width*0.225, car.y + car.height*0.63, car.width*0.375, car.height*0.28);
 
             ctx.fillStyle = '#95a5a6';
-            ctx.fillRect(car.x - 2, car.y - 8, car.width + 4, 12);
+            ctx.fillRect(car.x - car.width*0.033, car.y - car.height*0.09, car.width + car.width*0.066, car.height*0.13);
         }
 
         function drawObstacle(obstacle) {
             ctx.fillStyle = obstacle.color;
-
             switch(obstacle.type) {
                 case 'box':
                 case 'crate':
@@ -385,21 +477,21 @@
             ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
 
             ctx.fillStyle = '#2c3e50';
-            ctx.fillRect(enemy.x + 5, enemy.y + 10, enemy.width - 10, 15);
-            ctx.fillRect(enemy.x + 5, enemy.y + enemy.height - 25, enemy.width - 10, 15);
+            ctx.fillRect(enemy.x + enemy.width*0.1, enemy.y + enemy.height*0.125, enemy.width - enemy.width*0.2, enemy.height*0.1875);
+            ctx.fillRect(enemy.x + enemy.width*0.1, enemy.y + enemy.height - enemy.height*0.3125, enemy.width - enemy.width*0.2, enemy.height*0.1875);
 
             ctx.fillStyle = '#34495e';
-            ctx.fillRect(enemy.x - 3, enemy.y + 5, 8, 15);
-            ctx.fillRect(enemy.x + enemy.width - 5, enemy.y + 5, 8, 15);
-            ctx.fillRect(enemy.x - 3, enemy.y + enemy.height - 20, 8, 15);
-            ctx.fillRect(enemy.x + enemy.width - 5, enemy.y + enemy.height - 20, 8, 15);
+            ctx.fillRect(enemy.x - enemy.width*0.06, enemy.y + enemy.height*0.06, enemy.width*0.14, enemy.height*0.1875);
+            ctx.fillRect(enemy.x + enemy.width - enemy.width*0.125, enemy.y + enemy.height*0.06, enemy.width*0.14, enemy.height*0.1875);
+            ctx.fillRect(enemy.x - enemy.width*0.06, enemy.y + enemy.height - enemy.height*0.25, enemy.width*0.14, enemy.height*0.1875);
+            ctx.fillRect(enemy.x + enemy.width - enemy.width*0.125, enemy.y + enemy.height - enemy.height*0.25, enemy.width*0.14, enemy.height*0.1875);
 
             if (enemy.type === 'enemyTruck') {
                 ctx.fillStyle = '#7f8c8d';
-                ctx.fillRect(enemy.x + 8, enemy.y + 30, enemy.width - 16, 40);
+                ctx.fillRect(enemy.x + enemy.width*0.13, enemy.y + enemy.height*0.38, enemy.width - enemy.width*0.26, enemy.height*0.5);
             } else if (enemy.type === 'enemySports') {
                 ctx.fillStyle = '#2c3e50';
-                ctx.fillRect(enemy.x + 5, enemy.y + enemy.height - 5, enemy.width - 10, 3);
+                ctx.fillRect(enemy.x + enemy.width*0.1, enemy.y + enemy.height - enemy.height*0.0625, enemy.width - enemy.width*0.2, enemy.height*0.0375);
             }
         }
 
@@ -416,14 +508,15 @@
                     size: Math.random() * 6 + 2
                 });
             }
-
             screenShake.intensity = 8;
             screenShake.x = (Math.random() - 0.5) * screenShake.intensity;
             screenShake.y = (Math.random() - 0.5) * screenShake.intensity;
         }
 
         function drawExplosions() {
-            explosions.forEach((explosion, index) => {
+            // 逆順削除に修正
+            for(let i=explosions.length-1; i>=0; i--){
+                const explosion = explosions[i];
                 ctx.fillStyle = explosion.color;
                 ctx.globalAlpha = explosion.life / explosion.maxLife;
                 ctx.fillRect(explosion.x, explosion.y, explosion.size, explosion.size);
@@ -436,9 +529,9 @@
                 explosion.life--;
 
                 if (explosion.life <= 0) {
-                    explosions.splice(index, 1);
+                    explosions.splice(i, 1);
                 }
-            });
+            }
         }
 
         function updateScreenShake() {
@@ -452,7 +545,6 @@
         function drawRoad() {
             ctx.fillStyle = '#34495e';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
-
             ctx.fillStyle = '#7f8c8d';
             roadLines.forEach(line => {
                 ctx.fillRect(line.x, line.y, line.width, line.height);
@@ -466,41 +558,45 @@
                     line.y = -30;
                 }
             });
+            // 道路中央線の位置をcanvas幅に合わせて修正
+            roadLines.forEach(line => {
+                line.x = canvas.width/2 - 5;
+            });
         }
 
         function updatePlayer() {
-            if (keys['ArrowLeft'] && player.x > 30) {
+            if (keys['ArrowLeft'] && player.x > 0) {
                 player.x -= player.speed;
             }
-            if (keys['ArrowRight'] && player.x < canvas.width - 90) {
+            if (keys['ArrowRight'] && player.x < canvas.width - player.width) {
                 player.x += player.speed;
             }
-
             updatePlayerTrail();
         }
 
         function updateObstacles() {
-            obstacles.forEach((obstacle, index) => {
+            for(let i=obstacles.length-1; i>=0; i--){
+                const obstacle = obstacles[i];
                 if (!obstacle.destroyed) {
                     obstacle.y += gameSpeed;
                     if (obstacle.y > canvas.height) {
-                        obstacles.splice(index, 1);
+                        obstacles.splice(i, 1);
                     }
                 } else {
-                    obstacles.splice(index, 1);
+                    obstacles.splice(i, 1);
                 }
-            });
-
-            enemyCars.forEach((enemy, index) => {
+            }
+            for(let i=enemyCars.length-1; i>=0; i--){
+                const enemy = enemyCars[i];
                 if (!enemy.destroyed) {
                     enemy.y += gameSpeed;
                     if (enemy.y > canvas.height) {
-                        enemyCars.splice(index, 1);
+                        enemyCars.splice(i, 1);
                     }
                 } else {
-                    enemyCars.splice(index, 1);
+                    enemyCars.splice(i, 1);
                 }
-            });
+            }
         }
 
         function checkCollision() {
@@ -514,13 +610,10 @@
                     obstacle.destroyed = true;
                     score += obstacle.points;
                     scoreElement.textContent = score;
-
-                    playDestroySoundWithPitch(); // ピッチアップ機能を使用
-
+                    playDestroySoundWithPitch();
                     createExplosion(obstacle.x + obstacle.width/2, obstacle.y + obstacle.height/2, obstacle.color);
                 }
             });
-
             enemyCars.forEach((enemy, index) => {
                 if (!enemy.destroyed &&
                     player.x < enemy.x + enemy.width &&
@@ -531,9 +624,7 @@
                     enemy.destroyed = true;
                     score += enemy.points;
                     scoreElement.textContent = score;
-
-                    playDestroySoundWithPitch(); // ピッチアップ機能を使用
-
+                    playDestroySoundWithPitch();
                     createExplosion(enemy.x + enemy.width/2, enemy.y + enemy.height/2, enemy.color);
                 }
             });
@@ -542,7 +633,6 @@
         function draw() {
             ctx.save();
             ctx.translate(screenShake.x, screenShake.y);
-
             ctx.clearRect(-10, -10, canvas.width + 20, canvas.height + 20);
 
             drawRoad();
@@ -564,18 +654,18 @@
 
             if (gameState === 'waiting') {
                 ctx.fillStyle = '#ecf0f1';
-                ctx.font = '28px Arial';
+                ctx.font = Math.max(24, canvas.width/14) + 'px Arial';
                 ctx.textAlign = 'center';
                 ctx.fillText(' ハイスピード ', canvas.width / 2, canvas.height / 2);
-                ctx.font = '18px Arial';
-                ctx.fillText('無敵で破壊しまくれ！', canvas.width / 2, canvas.height / 2 + 35);
+                ctx.font = Math.max(14, canvas.width/22) + 'px Arial';
+                ctx.fillText('無敵で破壊しまくれ！', canvas.width / 2, canvas.height / 2 + canvas.height*0.06);
             } else if (gameState === 'gameOver') {
                 ctx.fillStyle = '#e74c3c';
-                ctx.font = '32px Arial';
+                ctx.font = Math.max(32, canvas.width/10) + 'px Arial';
                 ctx.textAlign = 'center';
                 ctx.fillText('ゲームオーバー', canvas.width / 2, canvas.height / 2);
                 ctx.fillStyle = '#f39c12';
-                ctx.font = '24px Arial';
+                ctx.font = Math.max(20, canvas.width/16) + 'px Arial';
                 ctx.fillText('最終スコア: ' + score, canvas.width / 2, canvas.height / 2 + 40);
             }
         }
@@ -583,37 +673,26 @@
         function gameLoop() {
             if (gameState === 'playing') {
                 frameCount++;
-
                 updateRoadLines();
                 updatePlayer();
                 updateObstacles();
                 updateScreenShake();
                 checkCollision();
 
-                // 高密度でより頻繁に生成
-                if (frameCount % 8 === 0) {
-                    spawnObstacle();
-                }
-
-                // 複数同時生成をより頻繁に
-                if (frameCount % 12 === 0) {
-                    spawnObstacle();
-                }
-
-                // 敵車をより頻繁に生成
-                if (frameCount % 20 === 0) {
-                    spawnEnemyCar();
-                }
-
-                // ゲームスピードを急激に上げる
-                if (frameCount % 120 === 0) {
-                    gameSpeed += 1.5;
-                }
+                if (frameCount % 8 === 0) spawnObstacle();
+                if (frameCount % 12 === 0) spawnObstacle();
+                if (frameCount % 20 === 0) spawnEnemyCar();
+                if (frameCount % 120 === 0) gameSpeed += 1.5;
             }
-
             draw();
             requestAnimationFrame(gameLoop);
         }
+
+        // resize時にもプレイヤー/障害物の座標を修正
+        window.addEventListener('resize',()=>{
+            player.x = canvas.width/2 - player.width/2;
+            player.y = canvas.height - player.height - 30;
+        });
 
         gameLoop();
     </script>
