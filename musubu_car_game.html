@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>むすぶカー - 高速破壊</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 50%, #95a5a6 100%);
+            font-family: 'Arial', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        
+        .game-container {
+            text-align: center;
+            background: rgba(52, 73, 94, 0.8);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+            border: 2px solid #7f8c8d;
+        }
+        
+        h1 {
+            color: #ecf0f1;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
+            margin-bottom: 20px;
+            font-size: 2.5em;
+        }
+        
+        canvas {
+            border: 3px solid #95a5a6;
+            border-radius: 15px;
+            background: #2c3e50;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+        }
+        
+        .controls {
+            margin-top: 20px;
+            color: #bdc3c7;
+            font-size: 1.2em;
+        }
+        
+        .score {
+            color: #ecf0f1;
+            font-size: 1.5em;
+            margin-bottom: 10px;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+        }
+        
+        .time-display {
+            color: #f39c12;
+            font-size: 1.5em;
+            margin-bottom: 10px;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+        }
+        
+        .game-over {
+            color: #e74c3c;
+            font-size: 2em;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
+            margin-bottom: 15px;
+        }
+        
+        .restart-btn {
+            background: linear-gradient(45deg, #7f8c8d, #95a5a6);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 1.2em;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+        }
+        
+        .restart-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+            background: linear-gradient(45deg, #95a5a6, #bdc3c7);
+        }
+        
+
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <h1>むすぶカー</h1>
+        <div class="score">破壊スコア: <span id="score">0</span></div>
+        <div class="time-display">残り時間: <span id="timer">60</span>秒</div>
+        <canvas id="gameCanvas" width="400" height="600"></canvas>
+        <div class="controls">
+            <p>左右キー: 車を操作 | スペースキー: ゲーム開始/再開</p>
+        </div>
+        <div id="gameOverScreen" style="display: none;">
+            <div class="game-over">タイムアップ！</div>
+            <button class="restart-btn" onclick="restartGame()">もう一度プレイ</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
+        const timerElement = document.getElementById('timer');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+
+        let gameState = 'waiting';
+        let score = 0;
+        let gameSpeed = 12; // 初期スピード大幅アップ
+        let frameCount = 0;
+        let gameTime = 60; // 60秒のタイムアタック
+        let gameTimer = null;
+
+        // 音声ファイル
+        const menuBGM = new Audio('soundm.mp3');
+        const gameBGM = new Audio('soundo.mp3');
+        const destroySound = new Audio('sound.mp3');
+        
+        menuBGM.loop = true;
+        gameBGM.loop = true;
+        menuBGM.volume = 0.5;
+        gameBGM.volume = 0.6;
+        destroySound.volume = 0.8;
+
+        // プレイヤーの車（高速仕様）
+        const player = {
+            x: canvas.width / 2 - 30,
+            y: canvas.height - 120,
+            width: 60,
+            height: 90,
+            speed: 12, // プレイヤーもハイスピード
+            color: '#7f8c8d',
+            trail: []
+        };
+
+        // 障害物（より多様で高密度）+ 敵車
+        const obstacles = [];
+        const enemyCars = [];
+        
+        const obstacleTypes = [
+            { color: '#e67e22', size: 25, points: 10, type: 'box' },
+            { color: '#8e44ad', size: 22, points: 15, type: 'barrel' },
+            { color: '#27ae60', size: 18, points: 5, type: 'cone' },
+            { color: '#3498db', size: 40, points: 30, type: 'boulder' },
+            { color: '#9b59b6', size: 28, points: 18, type: 'crate' }
+        ];
+        
+        const enemyCarTypes = [
+            { color: '#e74c3c', points: 25, type: 'enemyCar' },
+            { color: '#f39c12', points: 35, type: 'enemyTruck' },
+            { color: '#c0392b', points: 30, type: 'enemySports' }
+        ];
+
+        // 破壊エフェクト
+        const explosions = [];
+        const screenShake = { x: 0, y: 0, intensity: 0 };
+
+        // 道路のライン（高速移動）
+        const roadLines = [];
+        for (let i = 0; i < 12; i++) {
+            roadLines.push({
+                x: canvas.width / 2 - 5,
+                y: i * 60,
+                width: 10,
+                height: 30
+            });
+        }
+
+        // 開始時にメニューBGMを再生
+        menuBGM.play().catch(e => console.log('Audio autoplay blocked'));
+
+        // キー入力
+        const keys = {};
+        document.addEventListener('keydown', (e) => {
+            keys[e.key] = true;
+            if (e.key === ' ') {
+                e.preventDefault();
+                if (gameState === 'waiting' || gameState === 'gameOver') {
+                    startGame();
+                }
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            keys[e.key] = false;
+        });
+
+        // ピッチアップ機能
+        function playDestroySoundWithPitch() {
+            // ゲームスピードに応じてピッチを計算 (12が初期スピード)
+            const basePitch = 1.0;
+            const pitchMultiplier = gameSpeed / 12; // 1.0から開始して徐々に上昇
+            const maxPitch = 2.5; // 最大ピッチを制限
+            
+            // ピッチを1.0から2.5の間で制限
+            const pitch = Math.min(basePitch * pitchMultiplier, maxPitch);
+            
+            // Web Audio APIを使用してピッチを変更
+            if (destroySound.readyState >= 2) { // 音声が読み込み済みの場合
+                destroySound.currentTime = 0;
+                destroySound.playbackRate = pitch;
+                destroySound.play().catch(e => console.log('Sound play failed'));
+            }
+        }
+
+        function startGame() {
+            gameState = 'playing';
+            score = 0;
+            gameSpeed = 12; // ハイスピード開始
+            gameTime = 60;
+            obstacles.length = 0;
+            enemyCars.length = 0;
+            explosions.length = 0;
+            player.x = canvas.width / 2 - 30;
+            player.trail = [];
+            gameOverScreen.style.display = 'none';
+            frameCount = 0;
+            
+            // 破壊音のピッチをリセット
+            destroySound.playbackRate = 1.0;
+            
+            // タイマー開始
+            gameTimer = setInterval(() => {
+                gameTime--;
+                timerElement.textContent = gameTime;
+                if (gameTime <= 0) {
+                    endGame();
+                }
+            }, 1000);
+            
+            // BGM切り替え
+            menuBGM.pause();
+            menuBGM.currentTime = 0;
+            gameBGM.play().catch(e => console.log('Audio play failed'));
+        }
+
+        function endGame() {
+            gameState = 'gameOver';
+            gameOverScreen.style.display = 'block';
+            gameBGM.pause();
+            menuBGM.play().catch(e => console.log('Audio play failed'));
+            clearInterval(gameTimer);
+            
+            // 破壊音のピッチをリセット
+            destroySound.playbackRate = 1.0;
+        }
+
+        function restartGame() {
+            startGame();
+        }
+
+        function spawnObstacle() {
+            const lanes = [60, 120, 180, 240, 300];
+            const lane = lanes[Math.floor(Math.random() * lanes.length)];
+            const obstacleType = obstacleTypes[Math.floor(Math.random() * obstacleTypes.length)];
+            
+            obstacles.push({
+                x: lane - obstacleType.size / 2,
+                y: -obstacleType.size,
+                width: obstacleType.size,
+                height: obstacleType.size,
+                color: obstacleType.color,
+                points: obstacleType.points,
+                type: obstacleType.type,
+                destroyed: false
+            });
+        }
+
+        function spawnEnemyCar() {
+            const lanes = [75, 150, 225, 300];
+            const lane = lanes[Math.floor(Math.random() * lanes.length)];
+            const enemyType = enemyCarTypes[Math.floor(Math.random() * enemyCarTypes.length)];
+            
+            let width = 50, height = 80;
+            if (enemyType.type === 'enemyTruck') {
+                width = 60;
+                height = 100;
+            } else if (enemyType.type === 'enemySports') {
+                width = 45;
+                height = 75;
+            }
+            
+            enemyCars.push({
+                x: lane - width / 2,
+                y: -height,
+                width: width,
+                height: height,
+                color: enemyType.color,
+                points: enemyType.points,
+                type: enemyType.type,
+                destroyed: false
+            });
+        }
+
+        function updatePlayerTrail() {
+            player.trail.push({
+                x: player.x,
+                y: player.y,
+                alpha: 1
+            });
+            
+            if (player.trail.length > 5) {
+                player.trail.shift();
+            }
+            
+            player.trail.forEach(trail => {
+                trail.alpha -= 0.2;
+            });
+        }
+
+        function drawPlayerTrail() {
+            player.trail.forEach((trail, index) => {
+                if (trail.alpha > 0) {
+                    ctx.globalAlpha = trail.alpha * 0.5;
+                    ctx.fillStyle = '#95a5a6';
+                    ctx.fillRect(trail.x, trail.y, player.width, player.height);
+                }
+            });
+            ctx.globalAlpha = 1;
+        }
+
+        function drawCar(car) {
+            ctx.fillStyle = car.color;
+            ctx.fillRect(car.x, car.y, car.width, car.height);
+            
+            ctx.fillStyle = '#34495e';
+            ctx.fillRect(car.x + 8, car.y + 15, car.width - 16, 20);
+            ctx.fillRect(car.x + 8, car.y + 55, car.width - 16, 20);
+            
+            ctx.fillStyle = '#2c3e50';
+            ctx.fillRect(car.x + 5, car.y + 5, car.width - 10, 8);
+            
+            ctx.fillStyle = '#2c3e50';
+            ctx.fillRect(car.x - 6, car.y + 8, 15, 25);
+            ctx.fillRect(car.x + car.width - 9, car.y + 8, 15, 25);
+            ctx.fillRect(car.x - 6, car.y + 57, 15, 25);
+            ctx.fillRect(car.x + car.width - 9, car.y + 57, 15, 25);
+            
+            ctx.fillStyle = '#95a5a6';
+            ctx.fillRect(car.x - 2, car.y - 8, car.width + 4, 12);
+        }
+
+        function drawObstacle(obstacle) {
+            ctx.fillStyle = obstacle.color;
+            
+            switch(obstacle.type) {
+                case 'box':
+                case 'crate':
+                    ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+                    ctx.strokeStyle = '#2c3e50';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+                    break;
+                case 'barrel':
+                    ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+                    ctx.fillStyle = '#2c3e50';
+                    ctx.fillRect(obstacle.x, obstacle.y + 3, obstacle.width, 2);
+                    ctx.fillRect(obstacle.x, obstacle.y + obstacle.height - 5, obstacle.width, 2);
+                    break;
+                case 'cone':
+                    ctx.beginPath();
+                    ctx.moveTo(obstacle.x + obstacle.width/2, obstacle.y);
+                    ctx.lineTo(obstacle.x, obstacle.y + obstacle.height);
+                    ctx.lineTo(obstacle.x + obstacle.width, obstacle.y + obstacle.height);
+                    ctx.closePath();
+                    ctx.fill();
+                    break;
+                case 'boulder':
+                    ctx.beginPath();
+                    ctx.arc(obstacle.x + obstacle.width/2, obstacle.y + obstacle.height/2, obstacle.width/2, 0, Math.PI * 2);
+                    ctx.fill();
+                    break;
+            }
+        }
+
+        function drawEnemyCar(enemy) {
+            ctx.fillStyle = enemy.color;
+            ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+            
+            ctx.fillStyle = '#2c3e50';
+            ctx.fillRect(enemy.x + 5, enemy.y + 10, enemy.width - 10, 15);
+            ctx.fillRect(enemy.x + 5, enemy.y + enemy.height - 25, enemy.width - 10, 15);
+            
+            ctx.fillStyle = '#34495e';
+            ctx.fillRect(enemy.x - 3, enemy.y + 5, 8, 15);
+            ctx.fillRect(enemy.x + enemy.width - 5, enemy.y + 5, 8, 15);
+            ctx.fillRect(enemy.x - 3, enemy.y + enemy.height - 20, 8, 15);
+            ctx.fillRect(enemy.x + enemy.width - 5, enemy.y + enemy.height - 20, 8, 15);
+            
+            if (enemy.type === 'enemyTruck') {
+                ctx.fillStyle = '#7f8c8d';
+                ctx.fillRect(enemy.x + 8, enemy.y + 30, enemy.width - 16, 40);
+            } else if (enemy.type === 'enemySports') {
+                ctx.fillStyle = '#2c3e50';
+                ctx.fillRect(enemy.x + 5, enemy.y + enemy.height - 5, enemy.width - 10, 3);
+            }
+        }
+
+        function createExplosion(x, y, color) {
+            for (let i = 0; i < 15; i++) {
+                explosions.push({
+                    x: x + Math.random() * 30 - 15,
+                    y: y + Math.random() * 30 - 15,
+                    vx: (Math.random() - 0.5) * 15,
+                    vy: (Math.random() - 0.5) * 15,
+                    color: color,
+                    life: 25,
+                    maxLife: 25,
+                    size: Math.random() * 6 + 2
+                });
+            }
+            
+            screenShake.intensity = 8;
+            screenShake.x = (Math.random() - 0.5) * screenShake.intensity;
+            screenShake.y = (Math.random() - 0.5) * screenShake.intensity;
+        }
+
+        function drawExplosions() {
+            explosions.forEach((explosion, index) => {
+                ctx.fillStyle = explosion.color;
+                ctx.globalAlpha = explosion.life / explosion.maxLife;
+                ctx.fillRect(explosion.x, explosion.y, explosion.size, explosion.size);
+                ctx.globalAlpha = 1;
+                
+                explosion.x += explosion.vx;
+                explosion.y += explosion.vy;
+                explosion.vx *= 0.95;
+                explosion.vy *= 0.95;
+                explosion.life--;
+                
+                if (explosion.life <= 0) {
+                    explosions.splice(index, 1);
+                }
+            });
+        }
+
+        function updateScreenShake() {
+            if (screenShake.intensity > 0) {
+                screenShake.intensity *= 0.9;
+                screenShake.x = (Math.random() - 0.5) * screenShake.intensity;
+                screenShake.y = (Math.random() - 0.5) * screenShake.intensity;
+            }
+        }
+
+        function drawRoad() {
+            ctx.fillStyle = '#34495e';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#7f8c8d';
+            roadLines.forEach(line => {
+                ctx.fillRect(line.x, line.y, line.width, line.height);
+            });
+        }
+
+        function updateRoadLines() {
+            roadLines.forEach(line => {
+                line.y += gameSpeed;
+                if (line.y > canvas.height) {
+                    line.y = -30;
+                }
+            });
+        }
+
+        function updatePlayer() {
+            if (keys['ArrowLeft'] && player.x > 30) {
+                player.x -= player.speed;
+            }
+            if (keys['ArrowRight'] && player.x < canvas.width - 90) {
+                player.x += player.speed;
+            }
+            
+            updatePlayerTrail();
+        }
+
+        function updateObstacles() {
+            obstacles.forEach((obstacle, index) => {
+                if (!obstacle.destroyed) {
+                    obstacle.y += gameSpeed;
+                    if (obstacle.y > canvas.height) {
+                        obstacles.splice(index, 1);
+                    }
+                } else {
+                    obstacles.splice(index, 1);
+                }
+            });
+            
+            enemyCars.forEach((enemy, index) => {
+                if (!enemy.destroyed) {
+                    enemy.y += gameSpeed;
+                    if (enemy.y > canvas.height) {
+                        enemyCars.splice(index, 1);
+                    }
+                } else {
+                    enemyCars.splice(index, 1);
+                }
+            });
+        }
+
+        function checkCollision() {
+            obstacles.forEach((obstacle, index) => {
+                if (!obstacle.destroyed &&
+                    player.x < obstacle.x + obstacle.width &&
+                    player.x + player.width > obstacle.x &&
+                    player.y < obstacle.y + obstacle.height &&
+                    player.y + player.height > obstacle.y) {
+                    
+                    obstacle.destroyed = true;
+                    score += obstacle.points;
+                    scoreElement.textContent = score;
+                    
+                    playDestroySoundWithPitch(); // ピッチアップ機能を使用
+                    
+                    createExplosion(obstacle.x + obstacle.width/2, obstacle.y + obstacle.height/2, obstacle.color);
+                }
+            });
+            
+            enemyCars.forEach((enemy, index) => {
+                if (!enemy.destroyed &&
+                    player.x < enemy.x + enemy.width &&
+                    player.x + player.width > enemy.x &&
+                    player.y < enemy.y + enemy.height &&
+                    player.y + player.height > enemy.y) {
+                    
+                    enemy.destroyed = true;
+                    score += enemy.points;
+                    scoreElement.textContent = score;
+                    
+                    playDestroySoundWithPitch(); // ピッチアップ機能を使用
+                    
+                    createExplosion(enemy.x + enemy.width/2, enemy.y + enemy.height/2, enemy.color);
+                }
+            });
+        }
+
+        function draw() {
+            ctx.save();
+            ctx.translate(screenShake.x, screenShake.y);
+            
+            ctx.clearRect(-10, -10, canvas.width + 20, canvas.height + 20);
+            
+            drawRoad();
+            drawPlayerTrail();
+            drawCar(player);
+            obstacles.forEach(obstacle => {
+                if (!obstacle.destroyed) {
+                    drawObstacle(obstacle);
+                }
+            });
+            enemyCars.forEach(enemy => {
+                if (!enemy.destroyed) {
+                    drawEnemyCar(enemy);
+                }
+            });
+            drawExplosions();
+            
+            ctx.restore();
+            
+            if (gameState === 'waiting') {
+                ctx.fillStyle = '#ecf0f1';
+                ctx.font = '28px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(' ハイスピード ', canvas.width / 2, canvas.height / 2);
+                ctx.font = '18px Arial';
+                ctx.fillText('無敵で破壊しまくれ！', canvas.width / 2, canvas.height / 2 + 35);
+            } else if (gameState === 'gameOver') {
+                ctx.fillStyle = '#e74c3c';
+                ctx.font = '32px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('ゲームオーバー', canvas.width / 2, canvas.height / 2);
+                ctx.fillStyle = '#f39c12';
+                ctx.font = '24px Arial';
+                ctx.fillText('最終スコア: ' + score, canvas.width / 2, canvas.height / 2 + 40);
+            }
+        }
+
+        function gameLoop() {
+            if (gameState === 'playing') {
+                frameCount++;
+                
+                updateRoadLines();
+                updatePlayer();
+                updateObstacles();
+                updateScreenShake();
+                checkCollision();
+                
+                // 高密度でより頻繁に生成
+                if (frameCount % 8 === 0) {
+                    spawnObstacle();
+                }
+                
+                // 複数同時生成をより頻繁に
+                if (frameCount % 12 === 0) {
+                    spawnObstacle();
+                }
+                
+                // 敵車をより頻繁に生成
+                if (frameCount % 20 === 0) {
+                    spawnEnemyCar();
+                }
+                
+                // ゲームスピードを急激に上げる
+                if (frameCount % 120 === 0) {
+                    gameSpeed += 1.5;
+                }
+            }
+            
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        gameLoop();
+    </script>
+</body>
+</html>
